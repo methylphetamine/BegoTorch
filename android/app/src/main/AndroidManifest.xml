@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- CAMERA permission is required to access the torch via the Android framework's
+         Camera2 API. The framework's camera service runs in a privileged SELinux
+         domain, so it can write the torch sysfs node even when the app domain itself
+         is denied (the non-root path through the SELinux barrier). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:label="BegoTorch"
         android:name="${applicationName}"

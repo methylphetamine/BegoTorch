@@ -7,42 +7,31 @@ import android.os.Handler
 import android.os.Looper
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import java.io.File
 import java.util.concurrent.locks.ReentrantLock
 
 /**
- * Quick Settings tile that toggles the torch between off (0) and full (7) by
- * writing the level straight to the sysfs node:
- *
- *     /sys/devices/platform/flashlights_mt6360/torchbrightness
- *
- * No `su` (Magisk/KernelSU/APatch) is involved: the powa_karnal kernel ships
- * this node world-writable (0666), so an unprivileged app may write it.
- *
- * Writes run on a worker thread; the tile never blocks the main thread.
- */
+ * Quick Settings tile that toggles the torch between off (0) and full (MAX_VALUE).
 class TorchTileService : TileService() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val writeLock = ReentrantLock()
+    private val controller: TorchController by lazy { TorchController(this) }
 
     override fun onStartListening() {
         super.onStartListening()
+        // Probe cameras once when the tile becomes active.
+        if (!controller.isFrameworkAvailable()) {
+            controller.probeCameras()
+        }
         runAsync {
-            // Refresh state from the device (or last known level) so the tile
-            // reflects changes made by the app between panel opens.
             queryLevel()
         }
     }
 
     override fun onClick() {
-        // Main thread: decide from the cheap cached level only — never perform
-        // I/O on the torch node here. The worker thread verifies and corrects.
         val assumed = lastLevel()
         val target = if (assumed == 0) ON_VALUE else OFF_VALUE
 
-        // Optimistic update so the tile feels instant; corrected after the
-        // write completes (or fails).
         updateTile(target)
 
         runAsync {
@@ -54,19 +43,17 @@ class TorchTileService : TileService() {
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        controller.release()
+    }
+
     // --- state ---------------------------------------------------------------
 
-    /** Best-effort current brightness: real node value, else last known. */
+    /** Best-effort current brightness: framework state, else sysfs, else last known. */
     private fun queryLevel(): Int {
-        try {
-            val level = File(TORCH_DEVICE).readText().trim().toIntOrNull()
-            if (level != null && level in MIN_VALUE..MAX_VALUE) {
-                return level
-            }
-        } catch (_: Exception) {
-            // Node not readable by the app — fall through to the cached level.
-        }
-        return lastLevel()
+        // Ask the controller (which reads sysfs when framework not available).
+        return controller.currentLevel().coerceIn(MIN_VALUE, MAX_VALUE)
     }
 
     private fun lastLevel(): Int =
@@ -83,17 +70,16 @@ class TorchTileService : TileService() {
     // --- device writes -------------------------------------------------------
 
     /**
-     * Writes the brightness level to the torch node. The powa_karnal kernel
-     * ships this node world-writable (0666), so no root is involved. A short
-     * lock keeps concurrent taps serialized.
+     * Writes the brightness level via the Android framework's Camera2 API (non-root
+     * path). Falls back to direct sysfs write when no torch-capable camera is
+     * available or the framework path fails.
+     *
+     * The Camera2 torch mode is binary (on/off); any value > 0 is treated as on.
      */
     private fun writeTorch(level: Int): Boolean {
         writeLock.lock()
         try {
-            File(TORCH_DEVICE).writeText("$level\n")
-            return true
-        } catch (_: Exception) {
-            return false
+            return controller.setLevel(level)
         } finally {
             writeLock.unlock()
         }
@@ -132,10 +118,6 @@ class TorchTileService : TileService() {
     private companion object {
         const val PREFS = "begotorch_tile"
         const val KEY_LEVEL = "last_level"
-
-        const val TORCH_DEVICE =
-            "/sys/devices/platform/flashlights_mt6360/torchbrightness"
-
         const val MIN_VALUE = 0
         const val MAX_VALUE = 7
         const val OFF_VALUE = MIN_VALUE

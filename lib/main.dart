@@ -12,10 +12,10 @@
 //     so an unprivileged app may open it for writing;
 //   * the TWRP-flashable zip installs BegoTorch as a system priv-app, so it
 //     is registered by the OS at boot with no user interaction.
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Brightness range (0..7 inclusive) => 8 stops on the dial.
@@ -138,6 +138,9 @@ class _TorchHomePageState extends State<TorchHomePage> {
   String? _status;
   TorchIcon _icon = kTorchIcons.first;
 
+  // MethodChannel to the Android native TorchController.
+  static const _channel = MethodChannel('com.begonia.begotorch/torch');
+
   @override
   void initState() {
     super.initState();
@@ -156,11 +159,12 @@ class _TorchHomePageState extends State<TorchHomePage> {
     });
   }
 
-  /// Writes the current brightness level directly to the torch device node.
+  /// Writes the current brightness level to the torch via the Android framework
+  /// (Camera2 torch API) when available, falling back to direct sysfs write.
   ///
-  /// The powa_karnal kernel exposes `kTorchDevice` world-writable (0666), so a
-  /// sandboxed app can open it without any `su` escalation — opening the node
-  /// for writing either succeeds or throws sharply.
+  /// The framework path runs the write through the camera service, which is in a
+  /// privileged SELinux domain and can touch the torch sysfs node even when the
+  /// app domain is denied — the non-root path through the SELinux barrier.
   Future<void> _writeDevice() async {
     if (_busy) {
       return;
@@ -169,12 +173,19 @@ class _TorchHomePageState extends State<TorchHomePage> {
     _status = null;
     setState(() {});
     try {
-      await File(kTorchDevice).writeAsString('$_value\n', flush: true);
-      _root = true;
-      _status = 'Brightness set to $_value';
-    } on FileSystemException catch (e) {
+      // Call into Android native via MethodChannel.
+      // The native side handles: Camera2 torch when available, sysfs fallback otherwise.
+      final bool ok = await _channel.invokeMethod<bool>('setLevel', {'level': _value}) ?? false;
+      if (ok) {
+        _root = true;
+        _status = 'Brightness set to $_value';
+      } else {
+        _root = false;
+        _status = 'Failed to control the torch';
+      }
+    } on PlatformException catch (e) {
       _root = false;
-      _status = 'Torch node not writable: ${e.message}';
+      _status = 'Torch control failed: ${e.message}';
     } catch (_) {
       _root = false;
       _status = 'Failed to control the torch';
