@@ -11,6 +11,7 @@ import java.util.concurrent.locks.ReentrantLock
 
 /**
  * Quick Settings tile that toggles the torch between off (0) and full (MAX_VALUE).
+ */
 class TorchTileService : TileService() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
