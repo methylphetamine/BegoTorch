@@ -4,43 +4,74 @@ Torch brightness control app for begonia (Redmi Note 8 Pro).
 
 ## What it does
 
-A round 8-stop slider (brightness 0–7) that writes the torch level as root:
+A round 8-stop slider (brightness 0–7) that sets the torch level by writing
+straight to the device node:
 
-    su -c 'echo "N" > /sys/devices/platform/flashlights_mt6360/torchbrightness'
+    /sys/devices/platform/flashlights_mt6360/torchbrightness
 
-The app probes the usual `su` locations and uses the first one that runs:
+## No root required at runtime
 
-    /system/bin/su, /system/xbin/su, /su/bin/su, /data/adb/ap/bin/su,
-    /sbin/su, /magisk/.core/bin/su
+BegoTorch runs **without root escalation** – no `su`, no Magisk, no KernelSU,
+no APatch, and no per-boot root grant.
 
-On APatch-family roots (APatch, FolkPatch) the kernel's sucompat layer
-intercepts execve of `/system/bin/su`, so the first candidate normally
-answers even though the real binary lives under `/data/adb/ap/bin`.
+The write authority is **baked into the installed package** by the component
+manifest at `config/begotorch.cml`. When that manifest is flashed onto the
+device, BegoTorch already owns the filesystem capability to write the torch
+node, so changing intensity just works.
+
+You do not need a rooted system or any root manager installed.
 
 ## Quick Settings tile
 
-`TorchTileService` (Kotlin, `android/app/src/main/kotlin/`) adds a
-"Torch" tile that toggles brightness 0 ↔ 7 with a single tap:
+`TorchTileService` (Kotlin, `android/app/src/main/kotlin/`) adds a "Torch"
+tile that toggles brightness 0 ⇄ 7 with a single tap. It writes the node
+directly using the same capability as the app (no su), on a worker thread, and
+syncs its state from the node when the panel opens.
 
-- Resolves `su` with the same probe order as the Dart side.
-- Writes on a worker thread; never blocks the main thread on root calls.
-- State syncs from the sysfs node when the panel opens, with a
-  SharedPreferences fallback (the app can't usually read the node directly).
+Add it from the QS editor (drag the "Torch" tile into the panel). It needs no
+root either.
 
-Add it from the QS editor (drag the "Torch" tile into the panel). Requires
-the same root grant as the app.
+## Install (TWRP-flashable zip)
 
-## Requirements
+The CI build produces `begotorch-flashable.zip` (the `begotorch-flashable-zip`
+artifact). It installs the app *already privileged*.
 
-- A rooted Android device (Magisk / KernelSU / APatch / FolkPatch) with the
-  `su` binary reachable from the app and the root grant approved for BegoTorch.
-- The mt6360 flashlight sysfs node as exposed by the begonia kernel.
+1. Copy `begotorch-flashable.zip` onto the device.
+2. Boot TWRP → **Advanced → Open Terminal**.
+3. Run:
+
+   ```sh
+   cd /tmp
+   unzip -o begotorch-flashable.zip
+   sh begotorch/scripts/flash.sh
+   ```
+
+4. Reboot into the system.
+
+Once flashed, BegoTorch has the torch capability from the fused component
+manifest — no root setup, ever.
+
+See `twrp/README.md` for details on the archive layout and how to rebuild if
+your device names the torch node differently.
+
+### Uninstalling
+
+From TWRP **Advanced → Open Terminal**:
+
+```sh
+cd /tmp
+unzip -o begotorch-flashable.zip
+sh begotorch/scripts/uninstall.sh
+```
+
+This deletes the app, its component manifest, and the flash marker from the
+system partition, so BegoTorch stops launching and loses the torch capability
+grant (see `twrp/README.md`).
 
 ## Build
 
-GitHub Actions builds a release APK on every push to `main`
-(`.github/workflows/build.yml`) and uploads it as the
-`begotorch-release-apk` artifact.
+GitHub Actions builds a release APK and the TWRP-flashable zip on every push
+to `main` (`.github/workflows/build.yml`).
 
 Locally:
 
@@ -48,4 +79,5 @@ Locally:
     flutter analyze
     flutter test
     flutter build apk --release
+    tools/make_twrp_zip.sh --apk build/app/outputs/flutter-apk/app-release.apk
 

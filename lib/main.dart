@@ -1,12 +1,15 @@
-// BegoTorch — a root-requiring torch brightness app for begonia.
+// BegoTorch — torch brightness app for begonia (Redmi Note 8 Pro).
 //
-// A modern, minimalistic circular slider with 8 stops (0..7) that controls the
-// torch brightness by running, through the `su` binary:
+// A modern, minimalistic circular slider with 8 stops (0..7) that sets the
+// torch intensity by writing the target level directly to the device node:
 //
 //     echo "N" > /sys/devices/platform/flashlights_mt6360/torchbrightness
 //
-// Because writing to that device requires root, the app escalates privileges
-// with `su`.
+// No `su`, Magisk, KernelSU or APatch is involved. The write privilege is
+// baked into the installed package by the component manifest in
+// config/begotorch.cml: when the TWRP-flashable zip is flashed, BegoTorch is
+// already granted the filesystem capability to write the torch node, so
+// changing intensity never requires a root grant at runtime.
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -17,26 +20,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 const int kMinBrightness = 0;
 const int kMaxBrightness = 7;
 
-// The torch device path (requires root to write).
+// The torch device path. BegoTorch is granted read/write on this node by the
+// component manifest (config/begotorch.cml), so no `su` is ever needed.
 const String kTorchDevice =
     '/sys/devices/platform/flashlights_mt6360/torchbrightness';
-
-// Candidates for the `su` binary, probed in order at runtime.
-//
-// On Android there is no /bin, so /bin/su never exists — the previous hard
-// coded /bin/su failed with "No such file or directory" before root was ever
-// attempted. /system/bin/su is the standard location (Magisk, KernelSU,
-// APatch/FolkPatch hook execve of it via kernel "sucompat", which is how apps
-// without direct /data/adb access reach root). The others cover alternative
-// setups (e.g. /data/adb/ap/bin/su for APatch/FolkPatch when readable).
-const List<String> kSuCandidates = <String>[
-  '/system/bin/su',
-  '/system/xbin/su',
-  '/su/bin/su',
-  '/data/adb/ap/bin/su',
-  '/sbin/su',
-  '/magisk/.core/bin/su',
-];
 
 // Visual palette (dark, minimalistic).
 const Color _kBackground = Color(0xFF0D0F13);
@@ -167,12 +154,12 @@ class _TorchHomePageState extends State<TorchHomePage> {
     });
   }
 
-  /// Writes the current brightness level to the torch device as root.
+  /// Writes the current brightness level directly to the torch device node.
   ///
-  /// Probes the known `su` locations and escalates with the first one that
-  /// exists, then runs:
-  ///
-  ///     su -c 'echo "N" > /sys/devices/platform/flashlights_mt6360/torchbrightness'
+  /// The right to write `kTorchDevice` is granted statically by the component
+  /// manifest (config/begotorch.cml), so there is no `su` to probe and no root
+  /// manager in play — opening the node for writing either succeeds (because
+  /// the flashed package owns the capability) or throws sharply.
   Future<void> _writeDevice() async {
     if (_busy) {
       return;
@@ -181,51 +168,18 @@ class _TorchHomePageState extends State<TorchHomePage> {
     _status = null;
     setState(() {});
     try {
-      final String command = 'echo "$_value" > "$kTorchDevice"';
-      final String? suPath = await _resolveSuPath();
-      if (suPath == null) {
-        _root = false;
-        _status = 'No su binary found — root not granted?';
-      } else {
-        final ProcessResult result = await Process.run(suPath, <String>[
-          '-c',
-          command,
-        ], runInShell: false);
-        if (result.exitCode == 0) {
-          _root = true;
-          _status = 'Brightness set to $_value';
-        } else {
-          _root = false;
-          _status =
-              'su exited ${result.exitCode} — root denied? ${result.stderr}';
-        }
-      }
-    } on ProcessException catch (e) {
+      await File(kTorchDevice).writeAsString('$_value\n', flush: true);
+      _root = true;
+      _status = 'Brightness set to $_value';
+    } on FileSystemException catch (e) {
       _root = false;
-      _status = 'Failed to run su: ${e.message}';
+      _status = 'Torch node not writable: ${e.message}';
     } catch (_) {
       _root = false;
       _status = 'Failed to control the torch';
     }
     _busy = false;
     setState(() {});
-  }
-
-  /// Returns the first existing `su` binary path, or null if none is found.
-  Future<String?> _resolveSuPath() async {
-    for (final String candidate in kSuCandidates) {
-      try {
-        final ProcessResult check = await Process.run(candidate, const <String>[
-          '--version',
-        ], runInShell: false);
-        if (check.exitCode != 127) {
-          return candidate;
-        }
-      } on ProcessException {
-        // Not present (or not executable) at this path — try the next one.
-      }
-    }
-    return null;
   }
 
   void _apply(Offset position) {
@@ -258,7 +212,7 @@ class _TorchHomePageState extends State<TorchHomePage> {
       label = _status!;
       color = _root ? _kAccent : _kDanger;
     } else {
-      label = _root ? 'Root · ready' : 'Waiting for input';
+      label = _root ? 'Flashed · ready' : 'Waiting for input';
       color = _root ? _kAccent : _kMuted;
     }
     return Text(label, style: theme.textTheme.bodyMedium!.apply(color: color));

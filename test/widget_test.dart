@@ -1,10 +1,14 @@
 // Tests for BegoTorch.
 //
-// The widget smoke test never taps the dial, so no `su` probe can fire on CI.
-// The su-path resolution contract is covered by pure unit tests over the
-// public `kSuCandidates` list plus the dart:io behavior the resolver relies
-// on (missing binary => ProcessException, existing binary => ProcessResult).
+// BegoTorch writes the torch brightness directly; it never uses su / Magisk /
+// KernelSU / APatch. The write authority is granted by the component manifest
+// (config/begotorch.cml) that is fused into the flashed package. CI validates
+// that manifest contract here: the app must target the same node the manifest
+// authorises, and the shipped APK flow must not depend on any su binary.
+//
+// The widget smoke tests never tap the dial, so no device write can fire on CI.
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:begotorch/main.dart';
@@ -19,56 +23,51 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  group('su candidate list', () {
-    test('does not contain the Linux-only /bin/su path', () {
-      // /bin does not exist on Android; hardcoding it was the cause of
-      // "Failed to run su: No such file or directory".
-      expect(kSuCandidates, isNot(contains('/bin/su')));
-    });
-
-    test('starts with the standard Android su location', () {
-      expect(kSuCandidates.first, '/system/bin/su');
-    });
-
-    test('covers the APatch/FolkPatch binary dir', () {
-      expect(kSuCandidates, contains('/data/adb/ap/bin/su'));
-    });
-
-    test('covers the other common superuser locations', () {
-      expect(kSuCandidates, contains('/system/xbin/su'));
-      expect(kSuCandidates, contains('/su/bin/su'));
-      expect(kSuCandidates, contains('/sbin/su'));
-      expect(kSuCandidates, contains('/magisk/.core/bin/su'));
-    });
-
-    test('has no duplicates', () {
-      expect(kSuCandidates.toSet().length, kSuCandidates.length);
-    });
-  });
-
-  group('su probing prerequisites', () {
-    test('a missing binary raises ProcessException', () async {
-      await expectLater(
-        Process.run(
-          '/nonexistent/begotorch-probe',
-          const <String>[],
-          runInShell: false,
-        ),
-        throwsA(isA<ProcessException>()),
+  group('no-su contract', () {
+    test('the app targets the mt6360 torch node directly', () {
+      // BegoTorch writes the brightness straight to this node; there is no su
+      // escalation path in the app anymore (the old kSuCandidates list was
+      // removed entirely). The contract we keep is the device node itself.
+      expect(
+        kTorchDevice,
+        '/sys/devices/platform/flashlights_mt6360/torchbrightness',
       );
     });
 
     test(
-      'an existing binary yields a ProcessResult, not an exception',
+      'component manifest grants write on the same node the app writes',
       () async {
-        // /bin/false runs and exits non-zero: exactly the case the resolver
-        // must treat as "su exists" rather than skipping the candidate.
-        final ProcessResult result = await Process.run(
-          '/bin/false',
-          const <String>[],
-          runInShell: false,
-        );
-        expect(result.exitCode, isNot(0));
+        // The privileges are baked into config/begotorch.cml at flash time.
+        // Keep them in lockstep with the Dart constant so a renamed node never
+        // silently splits the two.
+        final File cml = File('config/begotorch.cml');
+        final String raw = await cml.readAsString();
+
+        // Fuchsia CML files permit // comments; dart:convert does not. Strip
+        // them before decoding so this test validates the live manifest.
+        final String text = raw
+            .split('\n')
+            .where((String line) => !line.trim().startsWith('//'))
+            .join('\n');
+
+        // dart:convert decodes JSON objects to Map<String, Object?> at runtime;
+        // cast once per level and traverse. A missing key surfaces as a failed
+        // (null-cast) assertion below instead of silently passing.
+        final Map<String, Object?> root =
+            jsonDecode(text) as Map<String, Object?>;
+        final Map<String, Object?> sandbox =
+            root['sandbox'] as Map<String, Object?>;
+        final Map<String, Object?> filesystem =
+            sandbox['filesystem'] as Map<String, Object?>;
+
+        final Object? nodeVal = filesystem[kTorchDevice];
+        expect(nodeVal, isNotNull);
+
+        final Map<String, Object?> nodeEntry = nodeVal as Map<String, Object?>;
+        final List<Object?> rights = nodeEntry['rights'] as List<Object?>;
+
+        expect(rights, contains('Write'));
+        expect(rights, contains('Read'));
       },
     );
   });

@@ -1,5 +1,5 @@
 name: begotorch
-description: "BegoTorch — root-required torch brightness control for begonia."
+description: "BegoTorch — rootless torch intensity control for begonia (TWRP-flashable)."
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 # The following defines the version and build number for your application.

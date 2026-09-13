@@ -8,21 +8,24 @@ import android.os.Looper
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import java.io.File
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 
 /**
- * Quick Settings tile that toggles the torch between off (0) and full (7)
- * brightness by writing to the same sysfs node as the app:
+ * Quick Settings tile that toggles the torch between off (0) and full (7) by
+ * writing the level straight to the sysfs node:
  *
- *     echo "N" > /sys/devices/platform/flashlights_mt6360/torchbrightness
+ *     /sys/devices/platform/flashlights_mt6360/torchbrightness
  *
- * The `su` binary is resolved with the same probe order as lib/main.dart
- * (kSuCandidates). Writes run on a worker thread; the tile never blocks the
- * main thread on a root call.
+ * No `su` (Magisk/KernelSU/APatch) is involved. The write privilege is granted
+ * statically by the component manifest (config/begotorch.cml) that is fused
+ * into the flashed package, so the tile needs no root grant at runtime.
+ *
+ * Writes run on a worker thread; the tile never blocks the main thread.
  */
 class TorchTileService : TileService() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val writeLock = ReentrantLock()
 
     override fun onStartListening() {
         super.onStartListening()
@@ -34,8 +37,8 @@ class TorchTileService : TileService() {
     }
 
     override fun onClick() {
-        // Main thread: decide from the cheap cached level only — never probe
-        // su here. The worker thread verifies and corrects below.
+        // Main thread: decide from the cheap cached level only — never perform
+        // I/O on the torch node here. The worker thread verifies and corrects.
         val assumed = lastLevel()
         val target = if (assumed == 0) ON_VALUE else OFF_VALUE
 
@@ -44,8 +47,7 @@ class TorchTileService : TileService() {
         updateTile(target)
 
         runAsync {
-            val su = resolveSuPath() ?: return@runAsync queryLevel()
-            val ok = writeTorch(su, target)
+            val ok = writeTorch(target)
             if (ok) {
                 rememberLevel(target)
             }
@@ -55,20 +57,8 @@ class TorchTileService : TileService() {
 
     // --- state ---------------------------------------------------------------
 
-    /** Best-effort current brightness: real sysfs value, else last known. */
+    /** Best-effort current brightness: real node value, else last known. */
     private fun queryLevel(): Int {
-        val su = resolveSuPath()
-        if (su != null) {
-            val result = runCatching {
-                exec(su, listOf("-c", "cat \"$TORCH_DEVICE\""))
-            }.getOrNull()
-            if (result != null && result.success) {
-                val level = result.output.trim().toIntOrNull()
-                if (level != null && level in MIN_VALUE..MAX_VALUE) {
-                    return level
-                }
-            }
-        }
         try {
             val level = File(TORCH_DEVICE).readText().trim().toIntOrNull()
             if (level != null && level in MIN_VALUE..MAX_VALUE) {
@@ -91,48 +81,23 @@ class TorchTileService : TileService() {
             .apply()
     }
 
-    // --- su plumbing (mirrors lib/main.dart) ---------------------------------
+    // --- device writes -------------------------------------------------------
 
-    private data class ExecResult(
-        val exitCode: Int,
-        val output: String,
-    ) {
-        val success: Boolean get() = exitCode == 0
-    }
-
-    private fun exec(command: String, args: List<String>): ExecResult {
-        val process = ProcessBuilder(listOf(command) + args)
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        if (!process.waitFor(3, TimeUnit.SECONDS)) {
-            process.destroyForcibly()
-            return ExecResult(exitCode = -1, output = "")
+    /**
+     * Writes the brightness level to the torch node. This is allowed because
+     * the flashed package owns the filesystem capability declared in
+     * config/begotorch.cml. A short lock keeps concurrent taps serialized.
+     */
+    private fun writeTorch(level: Int): Boolean {
+        writeLock.lock()
+        try {
+            File(TORCH_DEVICE).writeText("$level\n")
+            return true
+        } catch (_: Exception) {
+            return false
+        } finally {
+            writeLock.unlock()
         }
-        return ExecResult(exitCode = process.exitValue(), output = output)
-    }
-
-    /** First working `su` path, cached for the life of the process. */
-    private fun resolveSuPath(): String? {
-        suPathCache?.let { return it.ifEmpty { null } }
-        for (candidate in SU_CANDIDATES) {
-            val result = runCatching {
-                exec(candidate, listOf("--version"))
-            }.getOrNull() ?: continue
-            if (result.exitCode != 127) {
-                suPathCache = candidate
-                return candidate
-            }
-        }
-        suPathCache = ""
-        return null
-    }
-
-    private fun writeTorch(su: String, level: Int): Boolean {
-        val result = runCatching {
-            exec(su, listOf("-c", "echo \"$level\" > \"$TORCH_DEVICE\""))
-        }.getOrNull() ?: return false
-        return result.success
     }
 
     // --- tile rendering ------------------------------------------------------
@@ -176,19 +141,5 @@ class TorchTileService : TileService() {
         const val MAX_VALUE = 7
         const val OFF_VALUE = MIN_VALUE
         const val ON_VALUE = MAX_VALUE
-
-        // Same probe order as kSuCandidates in lib/main.dart.
-        val SU_CANDIDATES = listOf(
-            "/system/bin/su",
-            "/system/xbin/su",
-            "/su/bin/su",
-            "/data/adb/ap/bin/su",
-            "/sbin/su",
-            "/magisk/.core/bin/su",
-        )
-
-        /** Resolved su path; empty string means "none found" (negative cache). */
-        @Volatile
-        var suPathCache: String? = null
     }
 }

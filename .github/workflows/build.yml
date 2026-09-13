@@ -45,9 +45,29 @@ jobs:
       - name: Build release APK
         run: flutter build apk --release
 
+      - name: Install zip tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zip
+
+      # Assemble the TWRP-flashable package. The component manifest
+      # (config/begotorch.cml) is fused in here, so the flashed app already has
+      # the torch capability and needs no su / Magisk / KernelSU at runtime.
+      - name: Build TWRP-flashable zip
+        run: |
+          tools/make_twrp_zip.sh \
+            --apk build/app/outputs/flutter-apk/app-release.apk
+
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: begotorch-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload TWRP-flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: begotorch-flashable-zip
+          path: dist/begotorch-flashable.zip
           if-no-files-found: error
