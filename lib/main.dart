@@ -12,6 +12,7 @@
 //     so an unprivileged app may open it for writing;
 //   * the TWRP-flashable zip installs BegoTorch as a system priv-app, so it
 //     is registered by the OS at boot with no user interaction.
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';

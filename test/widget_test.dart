@@ -30,7 +30,7 @@ void main() {
       // entirely). The powa_karnal kernel ships this node world-writable
       // (0666) so the direct write works from an unprivileged app.
       expect(
-        kTorchDevice,
+        kTorchDeviceCustom,
         '/sys/devices/platform/flashlights_mt6360/torchbrightness',
       );
     });
