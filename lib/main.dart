@@ -152,9 +152,6 @@ class _TorchHomePageState extends State<TorchHomePage> {
   String? _status;
   TorchIcon _icon = kTorchIcons.first;
 
-  // MethodChannel to the Android native TorchController.
-  static const _channel = MethodChannel('com.begonia.begotorch/torch');
-
   @override
   void initState() {
     super.initState();
