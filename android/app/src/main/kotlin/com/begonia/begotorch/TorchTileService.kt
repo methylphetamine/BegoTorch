@@ -11,6 +11,12 @@ import java.util.concurrent.locks.ReentrantLock
 
 /**
  * Quick Settings tile that toggles the torch between off (0) and full (MAX_VALUE).
+ *
+ * The torch is controlled by writing directly to the sysfs node. The kernel must
+ * have the node labeled with a SELinux context that the ROM policy allows the
+ * app domain to write (see docs/kernel/).
+ *
+ * Writes run on a worker thread; the tile never blocks the main thread.
  */
 class TorchTileService : TileService() {
 
@@ -20,10 +26,7 @@ class TorchTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
-        // Probe cameras once when the tile becomes active.
-        if (!controller.isFrameworkAvailable()) {
-            controller.probeCameras()
-        }
+        controller.findWorkingPath()
         runAsync {
             queryLevel()
         }
@@ -51,9 +54,7 @@ class TorchTileService : TileService() {
 
     // --- state ---------------------------------------------------------------
 
-    /** Best-effort current brightness: framework state, else sysfs, else last known. */
     private fun queryLevel(): Int {
-        // Ask the controller (which reads sysfs when framework not available).
         return controller.currentLevel().coerceIn(MIN_VALUE, MAX_VALUE)
     }
 
@@ -70,13 +71,6 @@ class TorchTileService : TileService() {
 
     // --- device writes -------------------------------------------------------
 
-    /**
-     * Writes the brightness level via the Android framework's Camera2 API (non-root
-     * path). Falls back to direct sysfs write when no torch-capable camera is
-     * available or the framework path fails.
-     *
-     * The Camera2 torch mode is binary (on/off); any value > 0 is treated as on.
-     */
     private fun writeTorch(level: Int): Boolean {
         writeLock.lock()
         try {

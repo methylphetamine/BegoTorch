@@ -15,17 +15,30 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Brightness range (0..7 inclusive) => 8 stops on the dial.
 const int kMinBrightness = 0;
 const int kMaxBrightness = 7;
 
-// The torch device node. The powa_karnal kernel ships it world-writable
-// (0666), so no `su` is needed to write it.
-const String kTorchDevice =
+// The torch device node paths. The app tries each path until one works.
+// The kernel driver registers LED class devices (torch-light0/1/2) which
+// get standard LED class SELinux labeling that the ROM policy allows
+// system_app to write. See docs/kernel/ for details.
+
+/// LED class path (requires kernel LED class registration)
+const String kTorchDeviceLED =
+    '/sys/class/leds/torch-light0/brightness';
+
+/// Original custom path (MT6360 flashlight driver direct sysfs)
+const String kTorchDeviceCustom =
     '/sys/devices/platform/flashlights_mt6360/torchbrightness';
+
+/// List of candidate paths to try, in order of preference.
+const List<String> kTorchDeviceCandidates = [
+  kTorchDeviceLED,
+  kTorchDeviceCustom,
+];
 
 // Visual palette (dark, minimalistic).
 const Color _kBackground = Color(0xFF0D0F13);
@@ -159,12 +172,11 @@ class _TorchHomePageState extends State<TorchHomePage> {
     });
   }
 
-  /// Writes the current brightness level to the torch via the Android framework
-  /// (Camera2 torch API) when available, falling back to direct sysfs write.
+  /// Writes the current brightness level directly to the torch sysfs node.
   ///
-  /// The framework path runs the write through the camera service, which is in a
-  /// privileged SELinux domain and can touch the torch sysfs node even when the
-  /// app domain is denied — the non-root path through the SELinux barrier.
+  /// The app tries multiple possible sysfs paths (LED class, original custom node)
+  /// and uses the first one that works. The kernel must have the node labeled with
+  /// a SELinux context that the ROM policy allows the app to write.
   Future<void> _writeDevice() async {
     if (_busy) {
       return;
@@ -173,19 +185,29 @@ class _TorchHomePageState extends State<TorchHomePage> {
     _status = null;
     setState(() {});
     try {
-      // Call into Android native via MethodChannel.
-      // The native side handles: Camera2 torch when available, sysfs fallback otherwise.
-      final bool ok = await _channel.invokeMethod<bool>('setLevel', {'level': _value}) ?? false;
-      if (ok) {
-        _root = true;
-        _status = 'Brightness set to $_value';
-      } else {
-        _root = false;
-        _status = 'Failed to control the torch';
+      // Try each candidate path until one works
+      bool success = false;
+      for (final path in kTorchDeviceCandidates) {
+        try {
+          final file = File(path);
+          if (await file.exists()) {
+            await file.writeAsString('$_value\n', flush: true);
+            _root = true;
+            _status = 'Brightness set to $_value';
+            success = true;
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
       }
-    } on PlatformException catch (e) {
+      if (!success) {
+        _root = false;
+        _status = 'Torch node not writable: No accessible torch device found';
+      }
+    } on FileSystemException catch (e) {
       _root = false;
-      _status = 'Torch control failed: ${e.message}';
+      _status = 'Torch node not writable: ${e.message}';
     } catch (_) {
       _root = false;
       _status = 'Failed to control the torch';

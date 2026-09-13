@@ -1,54 +1,80 @@
 package com.begonia.begotorch
 
-import android.annotation.SuppressLint
 import android.content.Context
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraManager
-import android.os.Build
 import android.util.Log
 import java.io.File
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.concurrent.thread
 
 /**
- * Torch controller using Android Camera2 framework API (non-root path).
- * Falls back to sysfs /sys/devices/platform/flashlights_mt6360/torchbrightness
- * when the framework path is unavailable.
+ * Torch controller supporting multiple sysfs paths.
+ * 
+ * The app tries each candidate path until one works. The kernel driver
+ * registers LED class devices (torch-light0/1/2) which get standard LED
+ * class SELinux labeling that the ROM policy allows system_app to write.
+ * 
+ * See docs/kernel/ for details on the kernel-side implementation.
  */
 class TorchController(private val context: Context) {
 
     companion object {
         private const val TAG = "TorchController"
-        private const val SYSFS_TORCH_DEVICE =
+        
+        /** LED class path (kernel registers torch-light0/1/2) */
+        private const val SYSFS_LED_CLASS =
+            "/sys/class/leds/torch-light0/brightness"
+        
+        /** Original custom path (MT6360 flashlight driver) */
+        private const val SYSFS_CUSTOM =
             "/sys/devices/platform/flashlights_mt6360/torchbrightness"
+        
+        /** Ordered list of candidate paths to try */
+        private val CANDIDATE_PATHS = listOf(SYSFS_LED_CLASS, SYSFS_CUSTOM)
+        
         const val MIN_VALUE = 0
         const val MAX_VALUE = 7
         const val OFF_VALUE = MIN_VALUE
         const val ON_VALUE = MAX_VALUE
     }
 
-    private val cameraManager: CameraManager =
-        context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+    private var currentPath: String? = null
 
-    private val frameworkAvailable = AtomicBoolean(false)
-    private var lastCameraId: String? = null
-    private val executor = Executors.newSingleThreadExecutor { r ->
-        thread(start = true, name = "torch-ctrl", isDaemon = true) { r.run() }
+    /**
+     * Find which path is currently usable.
+     * Tries each candidate path until one works.
+     */
+    fun findWorkingPath(): String? {
+        for (path in CANDIDATE_PATHS) {
+            try {
+                val file = File(path)
+                if (file.exists()) {
+                    // Test write
+                    file.writeText("0\n")
+                    currentPath = path
+                    Log.d(TAG, "Found working path: $path")
+                    return path
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Path $path not accessible: ${e.message}")
+            }
+        }
+        Log.w(TAG, "No accessible torch path found")
+        return null
     }
-
-    private var torchOn = false
-    private var pendingLevel = OFF_VALUE
-
-    fun isFrameworkAvailable(): Boolean = frameworkAvailable.get()
 
     fun setLevel(level: Int): Boolean {
         val l = level.coerceIn(MIN_VALUE, MAX_VALUE)
-        val on = l > 0
-        return if (frameworkAvailable.get() && lastCameraId != null) {
-            setFwTorch(on)
-        } else {
-            writeSysfs(l)
+        val path = currentPath ?: findWorkingPath()
+        
+        if (path == null) {
+            Log.w(TAG, "No torch path available")
+            return false
+        }
+        
+        return try {
+            File(path).writeText("$l\n")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Write failed: ${e.message}")
+            false
         }
     }
 
@@ -59,82 +85,16 @@ class TorchController(private val context: Context) {
     }
 
     fun currentLevel(): Int {
-        if (frameworkAvailable.get() && lastCameraId != null) {
-            return if (torchOn) pendingLevel else OFF_VALUE
-        }
-        return readSysfs()
-    }
-
-    @SuppressLint("MissingPermission")
-    fun probeCameras() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            Log.v(TAG, "Camera2 not available")
-            return
-        }
-        try {
-            for (id in cameraManager.cameraIdList) {
-                val chars = cameraManager.getCameraCharacteristics(id)
-                if (chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true) {
-                    val facing = chars.get(CameraCharacteristics.LENS_FACING)
-                        ?: CameraCharacteristics.LENS_FACING_BACK
-                    if (facing == CameraCharacteristics.LENS_FACING_BACK
-                        || lastCameraId == null
-                    ) {
-                        lastCameraId = id
-                        frameworkAvailable.set(true)
-                        Log.v(TAG, "Torch camera: $id")
-                        return
-                    }
-                }
-            }
-            Log.v(TAG, "No torch camera; sysfs fallback")
-        } catch (e: SecurityException) {
-            Log.w(TAG, "CAMERA permission missing", e)
-        } catch (e: Exception) {
-            Log.w(TAG, "Probe failed", e)
-        }
-    }
-
-    private fun setFwTorch(on: Boolean): Boolean {
-        if (on == torchOn) {
-            pendingLevel = if (on) ON_VALUE else OFF_VALUE
-            return true
-        }
-        torchOn = on
-        pendingLevel = if (on) ON_VALUE else OFF_VALUE
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                cameraManager.setTorchMode(lastCameraId!!, on)
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "setTorchMode failed: ${e.message}")
-                writeSysfs(pendingLevel)
-            }
-        } else {
-            Log.w(TAG, "setTorchMode requires API 28; sysfs fallback")
-            writeSysfs(pendingLevel)
-        }
-    }
-
-    private fun writeSysfs(level: Int): Boolean {
+        val path = currentPath ?: return OFF_VALUE
         return try {
-            File(SYSFS_TORCH_DEVICE).writeText("$level\n")
-            true
+            File(path).readText().trim().toIntOrNull() ?: OFF_VALUE
         } catch (e: Exception) {
-            Log.w(TAG, "Sysfs write failed: ${e.message}")
-            false
-        }
-    }
-
-    private fun readSysfs(): Int {
-        return try {
-            File(SYSFS_TORCH_DEVICE).readText().trim().toIntOrNull() ?: OFF_VALUE
-        } catch (_: Exception) {
+            Log.w(TAG, "Read failed: ${e.message}")
             OFF_VALUE
         }
     }
 
     fun release() {
-        executor.shutdownNow()
+        // Cleanup if needed
     }
 }
