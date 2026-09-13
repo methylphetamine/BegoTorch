@@ -14,12 +14,11 @@ straight to the device node:
 BegoTorch runs **without root escalation** – no `su`, no Magisk, no KernelSU,
 no APatch, and no per-boot root grant.
 
-The write authority is **baked into the installed package** by the component
-manifest at `config/begotorch.cml`. When that manifest is flashed onto the
-device, BegoTorch already owns the filesystem capability to write the torch
-node, so changing intensity just works.
-
-You do not need a rooted system or any root manager installed.
+Instead of escalating, BegoTorch writes the torch node directly. Installed as
+a system priv-app (via the TWRP-flashable zip), it runs as a pre-installed
+system app — the strongest standard install position an app can have. Whether
+the torch node is writable then depends only on the ROM's sysfs ownership and
+SELinux policy (see `twrp/README.md`), not on any su binary being present.
 
 ## Quick Settings tile
 
@@ -34,7 +33,9 @@ root either.
 ## Install (TWRP-flashable zip)
 
 The CI build produces `begotorch-flashable.zip` (the `begotorch-flashable-zip`
-artifact). It installs the app *already privileged*.
+artifact). It installs BegoTorch **as a system priv-app**, so Android
+registers it automatically on the first boot after flashing — no su/Magisk/
+KernelSU involved in the install.
 
 1. Copy `begotorch-flashable.zip` onto the device.
 2. Boot TWRP → **Advanced → Open Terminal**.
@@ -46,13 +47,12 @@ artifact). It installs the app *already privileged*.
    sh begotorch/scripts/flash.sh
    ```
 
-4. Reboot into the system.
+4. Reboot into the system. BegoTorch appears as a pre-installed app.
 
-Once flashed, BegoTorch has the torch capability from the fused component
-manifest — no root setup, ever.
-
-See `twrp/README.md` for details on the archive layout and how to rebuild if
-your device names the torch node differently.
+See `twrp/README.md` for details (which mount layouts the installer detects,
+and the honest limits: priv-app placement does not by itself override the
+ROM's sysfs/SELinux restrictions on the torch node — the powa_karnal kernel
+handles that by shipping the node world-writable).
 
 ### Uninstalling
 
@@ -64,9 +64,8 @@ unzip -o begotorch-flashable.zip
 sh begotorch/scripts/uninstall.sh
 ```
 
-This deletes the app, its component manifest, and the flash marker from the
-system partition, so BegoTorch stops launching and loses the torch capability
-grant (see `twrp/README.md`).
+This deletes `<system>/priv-app/BegoTorch/`, so BegoTorch is gone after reboot
+(see `twrp/README.md`).
 
 ## Build
 

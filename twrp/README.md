@@ -1,25 +1,37 @@
 # BegoTorch — TWRP-flashable install
 
-This archive installs **BegoTorch** onto a begonia device (Redmi Note 8 Pro,
-Fuchsia) **already privileged**, so changing the torch intensity never needs a
-root grant, `su`, Magisk, KernelSU, or APatch.
+This archive installs **BegoTorch** onto a begonia (Redmi Note 8 Pro) device
+**as a system priv-app**, so Android registers it automatically on the first
+boot after flashing. Installing a privileged system app is the supported way to
+ship an app without user interaction — no `su`, Magisk, KernelSU, or APatch is
+involved at any point.
 
 ## What it installs
 
-* `system/begotorch/app.apk` — the app binary.
-* `system/begotorch/begotorch.cml` — the **component manifest** that grants the
-  app the filesystem capability to write the torch brightness node. This is the
-  "su access baked in" part: the authority lives in the installed package, not
-  in a runtime tool.
-* `system/begotorch/begotorch.far` — the Fuchsia package archive, when the CI
-  build produces one.
-* `scripts/flash.sh` — TWRP recovery installer (runs as root, places the files
-  into the system partition).
-* `scripts/install.sh` — idempotent post-flash hook.
-* `scripts/uninstall.sh` — TWRP recovery uninstaller (removes everything
-  `flash.sh` wrote).
-* `TwrJSON` — machine-readable metadata (package name, system mount, torch
-  path, root requirements).
+* `system/begotorch/app.apk` — the app binary. `flash.sh` copies it to
+  `<system>/priv-app/BegoTorch/base.apk`, the location Android's package
+  manager scans at boot.
+* `scripts/flash.sh` — TWRP recovery installer (runs as root in the recovery
+  shell). Detects the system mount layout automatically:
+  * System-as-Root image mounted at `/system_root` → installs to
+    `/system_root/system/priv-app/BegoTorch/`
+  * Legacy layout mounted at `/system` → installs to `/system/priv-app/BegoTorch/`
+  You can also pass an explicit mount point: `sh scripts/flash.sh /my_mount`.
+* `scripts/install.sh` — post-flash verification hook (checks the APK landed).
+* `scripts/uninstall.sh` — removes the app again (also cleans up the payload
+  directory written by the first version of this package).
+* `twrp.json` — machine-readable metadata (package name, install path, torch
+  node path, root requirements).
+
+## What this does NOT do
+
+Flashing an app as priv-app removes the need for root **to install and run the
+app**. Whether the app can actually write the torch sysfs node
+(`/sys/devices/platform/flashlights_mt6360/torchbrightness`) is decided by the
+ROM — by the node's ownership/permissions and its SELinux policy. If your ROM
+protects that node from all apps, the app will report "Torch node not
+writable"; that is a kernel/SELinux restriction, not a missing root grant, and
+no installer can bypass it from an app sandbox.
 
 ## How to flash (TWRP)
 
@@ -35,10 +47,14 @@ root grant, `su`, Magisk, KernelSU, or APatch.
 
 4. Reboot into the system.
 
+On the first boot Android scans `priv-app/` and registers BegoTorch as a
+pre-installed privileged app. It can take a minute to appear in the launcher
+after the first reboot.
+
 ## After flashing
 
-* Open BegoTorch and drag the dial — brightness writes succeed directly,
-  with no `su`, no Magisk/KernelSU, no per-boot root approval.
+* Open BegoTorch and drag the dial — brightness writes go straight to the torch
+  node, with no `su` and no per-boot root approval.
 * The same holds for the Quick Settings **Torch** tile.
 
 ## Uninstalling
@@ -51,17 +67,13 @@ unzip -o begotorch-flashable.zip
 sh begotorch/scripts/uninstall.sh
 ```
 
-This removes the app binary, the component manifest, and the `.flashed`
-marker from `/system`, so BegoTorch no longer launches and no longer holds the
-torch capability grant. Reboot afterwards.
+This deletes `<system>/priv-app/BegoTorch/` (and any leftover
+`<system>/begotorch/` payload directory from older versions). Reboot
+afterwards.
 
-You can also remove it by hand from TWRP by deleting the `begotorch/`
-directory under the system mount (everything `flash.sh` created lives there).
-
-## If the device changes its node name
+## If the device names the torch node differently
 
 BegoTorch talks to `/sys/devices/platform/flashlights_mt6360/torchbrightness`.
-If your begonia image names the node differently, update `torch_path` in
-`TwrJSON`, the path in `config/begotorch.cml`, rebuild, and re-flash. The
-app reads its target path from the same manifest, so keeping them in sync is
-all that is required.
+If your ROM uses a different node, update `kTorchDevice` in `lib/main.dart`,
+`TORCH_DEVICE` in `android/app/src/main/kotlin/com/begonia/begotorch/TorchTileService.kt`,
+and `torch_path` in `tools/make_twrp_zip.sh`, then rebuild and re-flash.

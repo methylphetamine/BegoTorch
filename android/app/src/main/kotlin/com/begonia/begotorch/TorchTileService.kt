@@ -16,9 +16,8 @@ import java.util.concurrent.locks.ReentrantLock
  *
  *     /sys/devices/platform/flashlights_mt6360/torchbrightness
  *
- * No `su` (Magisk/KernelSU/APatch) is involved. The write privilege is granted
- * statically by the component manifest (config/begotorch.cml) that is fused
- * into the flashed package, so the tile needs no root grant at runtime.
+ * No `su` (Magisk/KernelSU/APatch) is involved: the powa_karnal kernel ships
+ * this node world-writable (0666), so an unprivileged app may write it.
  *
  * Writes run on a worker thread; the tile never blocks the main thread.
  */
@@ -84,9 +83,9 @@ class TorchTileService : TileService() {
     // --- device writes -------------------------------------------------------
 
     /**
-     * Writes the brightness level to the torch node. This is allowed because
-     * the flashed package owns the filesystem capability declared in
-     * config/begotorch.cml. A short lock keeps concurrent taps serialized.
+     * Writes the brightness level to the torch node. The powa_karnal kernel
+     * ships this node world-writable (0666), so no root is involved. A short
+     * lock keeps concurrent taps serialized.
      */
     private fun writeTorch(level: Int): Boolean {
         writeLock.lock()

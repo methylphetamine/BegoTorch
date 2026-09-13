@@ -1,27 +1,49 @@
 #!/bin/sh
 #
-# install.sh — post-flash on-device helper, called by flash.sh (and usable
-# directly on the running system by a privileged operator). It re-reads the
-# component manifest so the package manager treats BegoTorch as having the
-# torch capability from this point on.
-#
-# On a booted, already-flashed system this is a no-op confirmation: the
-# capability is already granted. It exists mainly so tools/OEM flows have a
-# single idempotent hook to call.
+# install.sh — post-flash verification hook. After flash.sh has placed
+# BegoTorch in priv-app, this checks the APK is present. Usable on a booted
+# system too (no root needed to verify).
 #
 set -e
 
-PKG="begotorch"
-SYS_MOUNT="${1:-/system}"
-DEST="$SYS_MOUNT/$PKG"
+APP_NAME="BegoTorch"
+
+# Same layout detection as flash.sh.
+detect_system() {
+    if [ -d /system_root/system/priv-app ]; then
+        SYS_ROOT=/system_root; SUB=system
+    elif [ -d /system_root/priv-app ]; then
+        SYS_ROOT=/system_root; SUB=""
+    elif [ -d /system/priv-app ]; then
+        SYS_ROOT=/system; SUB=""
+    elif [ -d /system/system/priv-app ]; then
+        SYS_ROOT=/system; SUB=system
+    elif [ -n "$1" ] && [ -d "$1" ]; then
+        if [ -d "$1/system/priv-app" ]; then
+            SYS_ROOT="$1"; SUB=system
+        elif [ -d "$1/priv-app" ]; then
+            SYS_ROOT="$1"; SUB=""
+        else
+            echo "error: no priv-app directory under $1" >&2
+            exit 1
+        fi
+    else
+        SYS_ROOT=""; SUB=""
+    fi
+}
+
+detect_system "$1"
+APK="$SYS_ROOT/${SUB:+$SUB/}priv-app/$APP_NAME/base.apk"
 
 echo "== BegoTorch install hook =="
-if [ -f "$DEST/begotorch.cml" ]; then
-    echo "Component manifest present : $DEST/begotorch.cml"
-    echo "Capability (torch write)   : configured"
-    echo "Runtime root (su/magisk)   : NOT required"
+echo "System root  : ${SYS_ROOT:-<not detected>} (app base: /$SUB)"
+
+if [ -f "$APK" ]; then
+    echo "Priv-app APK present : $APK"
+    echo "Install status       : system priv-app (auto-registered at boot)"
+    echo "Runtime root         : NOT required"
 else
-    echo "warning: $DEST/begotorch.cml not found — run flash.sh first." >&2
+    echo "warning: $APK not found — run scripts/flash.sh first." >&2
     exit 1
 fi
 

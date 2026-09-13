@@ -1,14 +1,14 @@
 // Tests for BegoTorch.
 //
 // BegoTorch writes the torch brightness directly; it never uses su / Magisk /
-// KernelSU / APatch. The write authority is granted by the component manifest
-// (config/begotorch.cml) that is fused into the flashed package. CI validates
-// that manifest contract here: the app must target the same node the manifest
-// authorises, and the shipped APK flow must not depend on any su binary.
+// KernelSU / APatch. The write is possible because the powa_karnal kernel
+// ships the torch node world-writable (0666) and the TWRP-flashable zip
+// installs the app as a system priv-app. CI validates the app-side contract:
+// the app must target the exact node the kernel exposes, and no su escalation
+// path may creep back in.
 //
 // The widget smoke tests never tap the dial, so no device write can fire on CI.
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:begotorch/main.dart';
@@ -26,50 +26,38 @@ void main() {
   group('no-su contract', () {
     test('the app targets the mt6360 torch node directly', () {
       // BegoTorch writes the brightness straight to this node; there is no su
-      // escalation path in the app anymore (the old kSuCandidates list was
-      // removed entirely). The contract we keep is the device node itself.
+      // escalation path in the app (the old kSuCandidates list was removed
+      // entirely). The powa_karnal kernel ships this node world-writable
+      // (0666) so the direct write works from an unprivileged app.
       expect(
         kTorchDevice,
         '/sys/devices/platform/flashlights_mt6360/torchbrightness',
       );
     });
 
-    test(
-      'component manifest grants write on the same node the app writes',
-      () async {
-        // The privileges are baked into config/begotorch.cml at flash time.
-        // Keep them in lockstep with the Dart constant so a renamed node never
-        // silently splits the two.
-        final File cml = File('config/begotorch.cml');
-        final String raw = await cml.readAsString();
+    test('the installer places the app in priv-app', () {
+      // Contract with the TWRP package: flash.sh must install the APK where
+      // Android's package manager scans it (priv-app). If this drifts, the
+      // zip would silently stop installing the app at all.
+      final flashScript = File('twrp/flash.sh').readAsStringSync();
+      expect(flashScript, contains('priv-app'));
+      expect(flashScript, contains('base.apk'));
+      expect(flashScript, contains('/system_root'));
+      expect(flashScript, contains('/system'));
+    });
 
-        // Fuchsia CML files permit // comments; dart:convert does not. Strip
-        // them before decoding so this test validates the live manifest.
-        final String text = raw
-            .split('\n')
-            .where((String line) => !line.trim().startsWith('//'))
-            .join('\n');
-
-        // dart:convert decodes JSON objects to Map<String, Object?> at runtime;
-        // cast once per level and traverse. A missing key surfaces as a failed
-        // (null-cast) assertion below instead of silently passing.
-        final Map<String, Object?> root =
-            jsonDecode(text) as Map<String, Object?>;
-        final Map<String, Object?> sandbox =
-            root['sandbox'] as Map<String, Object?>;
-        final Map<String, Object?> filesystem =
-            sandbox['filesystem'] as Map<String, Object?>;
-
-        final Object? nodeVal = filesystem[kTorchDevice];
-        expect(nodeVal, isNotNull);
-
-        final Map<String, Object?> nodeEntry = nodeVal as Map<String, Object?>;
-        final List<Object?> rights = nodeEntry['rights'] as List<Object?>;
-
-        expect(rights, contains('Write'));
-        expect(rights, contains('Read'));
-      },
-    );
+    test('no process execution / su escalation path exists in the app', () {
+      // Guard against regression: the app must only do direct file IO on the
+      // torch node. Any Process.run/Process.start (the old su mechanism used
+      // Process.run) indicates an escalation path creeping back in.
+      final source = File('lib/main.dart').readAsStringSync();
+      expect(source.contains('Process.run'), isFalse,
+          reason: 'direct file writes only — no external processes');
+      expect(source.contains('Process.start'), isFalse,
+          reason: 'direct file writes only — no external processes');
+      expect(source.contains('kSuCandidates'), isFalse,
+          reason: 'the old su candidate probe was removed');
+    });
   });
 
   testWidgets('renders the torch dial and initial value', (

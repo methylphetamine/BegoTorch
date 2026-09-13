@@ -5,11 +5,13 @@
 //
 //     echo "N" > /sys/devices/platform/flashlights_mt6360/torchbrightness
 //
-// No `su`, Magisk, KernelSU or APatch is involved. The write privilege is
-// baked into the installed package by the component manifest in
-// config/begotorch.cml: when the TWRP-flashable zip is flashed, BegoTorch is
-// already granted the filesystem capability to write the torch node, so
-// changing intensity never requires a root grant at runtime.
+// No `su`, Magisk, KernelSU or APatch is involved. Two things make the direct
+// write possible:
+//
+//   * the powa_karnal kernel exposes the torch node world-writable (0666),
+//     so an unprivileged app may open it for writing;
+//   * the TWRP-flashable zip installs BegoTorch as a system priv-app, so it
+//     is registered by the OS at boot with no user interaction.
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -20,8 +22,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 const int kMinBrightness = 0;
 const int kMaxBrightness = 7;
 
-// The torch device path. BegoTorch is granted read/write on this node by the
-// component manifest (config/begotorch.cml), so no `su` is ever needed.
+// The torch device node. The powa_karnal kernel ships it world-writable
+// (0666), so no `su` is needed to write it.
 const String kTorchDevice =
     '/sys/devices/platform/flashlights_mt6360/torchbrightness';
 
@@ -156,10 +158,9 @@ class _TorchHomePageState extends State<TorchHomePage> {
 
   /// Writes the current brightness level directly to the torch device node.
   ///
-  /// The right to write `kTorchDevice` is granted statically by the component
-  /// manifest (config/begotorch.cml), so there is no `su` to probe and no root
-  /// manager in play — opening the node for writing either succeeds (because
-  /// the flashed package owns the capability) or throws sharply.
+  /// The powa_karnal kernel exposes `kTorchDevice` world-writable (0666), so a
+  /// sandboxed app can open it without any `su` escalation — opening the node
+  /// for writing either succeeds or throws sharply.
   Future<void> _writeDevice() async {
     if (_busy) {
       return;

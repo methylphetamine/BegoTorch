@@ -50,9 +50,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq zip
 
-      # Assemble the TWRP-flashable package. The component manifest
-      # (config/begotorch.cml) is fused in here, so the flashed app already has
-      # the torch capability and needs no su / Magisk / KernelSU at runtime.
+      # Assemble the TWRP-flashable package. flash.sh installs the APK as
+      # <system>/priv-app/BegoTorch/base.apk, which Android registers at boot;
+      # the powa_karnal kernel ships the torch node world-writable (0666), so
+      # the app needs no su/Magisk/KernelSU at runtime.
       - name: Build TWRP-flashable zip
         run: |
           tools/make_twrp_zip.sh \

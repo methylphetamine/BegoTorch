@@ -1,57 +1,73 @@
 #!/bin/sh
 #
-# uninstall.sh — reverse of flash.sh: removes BegoTorch from the system
-# partition so it stops launching and loses the torch capability grant.
+# uninstall.sh — remove BegoTorch from the system partition (reverse of
+# flash.sh). Also cleans up the payload directory left by older versions of
+# this package (system/begotorch/).
 #
-# Run from a TWRP "Open Terminal" recovery shell (privileged), after mounting
-# the system partition, e.g.:
-#     sh scripts/uninstall.sh
-#
-# What it deletes (everything flash.sh installed):
-#     $SYS_MOUNT/$PKG/{app.apk,begotorch.cml,begotorch.far,.flashed}
+# Run from a TWRP "Open Terminal" recovery shell:
+#     sh scripts/uninstall.sh [mount-point]
 #
 set -e
 
-PKG="begotorch"
-SYS_MOUNT="${1:-/system}"
-DEST="$SYS_MOUNT/$PKG"
+APP_NAME="BegoTorch"
+PKG_DIR="begotorch"
 
-# Be CWD-independent: paths below are not used for the payload, but keep the
-# same convention so behaviour matches flash.sh.
-cd "$(dirname "$0")/.."
+# Same layout detection as flash.sh.
+detect_system() {
+    if [ -d /system_root/system/priv-app ]; then
+        SYS_ROOT=/system_root; SUB=system
+    elif [ -d /system_root/priv-app ]; then
+        SYS_ROOT=/system_root; SUB=""
+    elif [ -d /system/priv-app ]; then
+        SYS_ROOT=/system; SUB=""
+    elif [ -d /system/system/priv-app ]; then
+        SYS_ROOT=/system; SUB=system
+    elif [ -n "$1" ] && [ -d "$1" ]; then
+        if [ -d "$1/system/priv-app" ]; then
+            SYS_ROOT="$1"; SUB=system
+        elif [ -d "$1/priv-app" ]; then
+            SYS_ROOT="$1"; SUB=""
+        else
+            echo "error: no priv-app directory under $1" >&2
+            exit 1
+        fi
+    else
+        SYS_ROOT=""; SUB=""
+    fi
+}
+
+detect_system "$1"
 
 echo "== BegoTorch TWRP uninstall =="
-echo "System mount : $SYS_MOUNT"
-echo "Package dir  : $DEST"
+echo "System root  : ${SYS_ROOT:-<not detected>} (app base: /$SUB)"
 
-if [ ! -d "$SYS_MOUNT" ]; then
-    echo "error: $SYS_MOUNT is not mounted." >&2
-    echo "Mount the system partition first (TWRP auto-mounts, or 'mount /system')." >&2
+if [ -z "$SYS_ROOT" ]; then
+    echo "error: could not find a mounted system partition with priv-app." >&2
+    echo "In TWRP use Mount and tick System first, then re-run this script." >&2
     exit 1
 fi
 
-if [ ! -d "$DEST" ]; then
-    echo "BegoTorch is not installed at $DEST — nothing to remove."
-    exit 0
+mount -o remount,rw "$SYS_ROOT" 2>/dev/null || true
+
+# 1) The priv-app installed by flash.sh.
+PRIV_APP="$SYS_ROOT/${SUB:+$SUB/}priv-app/$APP_NAME"
+if [ -d "$PRIV_APP" ]; then
+    rm -rf "$PRIV_APP"
+    echo "Removed priv-app : $PRIV_APP"
+else
+    echo "Not present      : $PRIV_APP"
 fi
 
-# Remove the flash marker first so a reboot into the system does not try to
-# re-register the package from a half-removed manifest.
-rm -f "$DEST/.flashed"
-
-# Remove the payload and the manifest that granted the torch capability.
-rm -f "$DEST/app.apk"
-rm -f "$DEST/begotorch.cml"
-rm -f "$DEST/begotorch.far"
-
-# Drop the now-empty package directory (ignore failure if something else is
-# using it).
-rmdir "$DEST" 2>/dev/null || true
+# 2) Cleanup for packages flashed by the original (broken) script layout.
+OLD_DIR="$SYS_ROOT/${SUB:+$SUB/}$PKG_DIR"
+if [ -d "$OLD_DIR" ]; then
+    rm -rf "$OLD_DIR"
+    echo "Removed legacy   : $OLD_DIR"
+fi
 
 sync
 
 echo
-echo "BegoTorch removed. Reboot into the system; the app and its torch"
-echo "capability grant are gone."
+echo "BegoTorch removed. Reboot into the system; the app is gone."
 echo
 exit 0
