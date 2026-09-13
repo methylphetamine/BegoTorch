@@ -21,36 +21,29 @@ class MainActivity : FlutterActivity() {
         torchController.release()
     }
 
-    override fun provideFlutterEngine(flutterEngine: FlutterEngine): FlutterEngine {
-        flutterEngine.addEnginePlugin(
-            object : io.flutter.embedding.engine.FlutterEngine.EnginePlugin {
-                override fun onAttachedToEngine(binding: io.flutter.embedding.engine.FlutterEngine.EngineAttachment) {
-                    val channel = MethodChannel(binding.dartExecutor.binaryMessenger, channelName)
-                    channel.setMethodCallHandler { call, result ->
-                        when (call.method) {
-                            "setLevel" -> {
-                                val level = call.argument<Int>("level") ?: 0
-                                val ok = torchController.setLevel(level)
-                                result.success(ok)
-                            }
-                            "currentLevel" -> {
-                                result.success(torchController.currentLevel())
-                            }
-                            "isFrameworkAvailable" -> {
-                                result.success(torchController.isFrameworkAvailable())
-                            }
-                            "toggleFrom" -> {
-                                val current = call.argument<Int>("current") ?: 0
-                                val newLevel = torchController.toggleFrom(current)
-                                result.success(newLevel)
-                            }
-                            else -> result.notImplemented()
-                        }
-                    }
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setLevel" -> {
+                    val level = call.argument<Int>("level") ?: 0
+                    val ok = torchController.setLevel(level)
+                    result.success(ok)
                 }
+                "currentLevel" -> {
+                    result.success(torchController.currentLevel())
+                }
+                "isFrameworkAvailable" -> {
+                    result.success(torchController.isFrameworkAvailable())
+                }
+                "toggleFrom" -> {
+                    val current = call.argument<Int>("current") ?: 0
+                    val newLevel = torchController.toggleFrom(current)
+                    result.success(newLevel)
+                }
+                else -> result.notImplemented()
             }
-        )
-        return flutterEngine
+        }
     }
 }
 

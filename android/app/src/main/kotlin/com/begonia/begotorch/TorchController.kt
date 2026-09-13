@@ -44,9 +44,9 @@ class TorchController(private val context: Context) {
 
     fun setLevel(level: Int): Boolean {
         val l = level.coerceIn(MIN_VALUE, MAX_VALUE)
-        val target = if (l > 0) ON_VALUE else OFF_VALUE
+        val on = l > 0
         return if (frameworkAvailable.get() && lastCameraId != null) {
-            setFwTorch(target)
+            setFwTorch(on)
         } else {
             writeSysfs(l)
         }
@@ -95,16 +95,17 @@ class TorchController(private val context: Context) {
         }
     }
 
-    private fun setFwTorch(on: Boolean) {
+    private fun setFwTorch(on: Boolean): Boolean {
         if (on == torchOn) {
             pendingLevel = if (on) ON_VALUE else OFF_VALUE
-            return
+            return true
         }
         torchOn = on
         pendingLevel = if (on) ON_VALUE else OFF_VALUE
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
                 cameraManager.setTorchMode(lastCameraId!!, on)
+                true
             } catch (e: Exception) {
                 Log.w(TAG, "setTorchMode failed: ${e.message}")
                 writeSysfs(pendingLevel)
