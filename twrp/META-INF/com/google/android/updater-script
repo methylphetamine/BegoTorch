@@ -1,0 +1,11 @@
+# TorchBridge — TWRP flashable package
+#
+# This installer is a shell script, not an edify script: the real work happens in
+# META-INF/com/google/android/update-binary (a #!/sbin/sh script, which TWRP
+# executes directly). This file exists because the flashable-zip format requires
+# it, and exits immediately if some other recovery insists on parsing it.
+#
+# Nothing needs to be changed here, and nothing here reads user input.
+
+assert(1, 1);
+abort("This package installs itself from update-binary (a shell script). If you are seeing this message, the recovery parsed updater-script instead of running update-binary.");

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Palette for the hand-drawn strength picker. Kept in resources rather than
+      inlined so a ROM themer can override it with an RRO without touching code.
+      Values mirror the app's dark, low-glare look so the picker reads as part of
+      the Quick Settings panel.
+    -->
+    <color name="torch_panel">#FF12141A</color>
+    <color name="torch_panel_edge">#FF2A3038</color>
+    <color name="torch_stop">#FF1E222B</color>
+    <color name="torch_accent">#FFF2C94C</color>
+    <color name="torch_muted">#FF8A94A0</color>
+</resources>

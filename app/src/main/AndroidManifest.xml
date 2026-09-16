@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TorchBridge — headless torch strength component.
+
+  There is deliberately no activity here at all: nothing to launch, nothing to
+  open, nothing exported. The entire user-facing surface is two Quick Settings
+  tiles plus the dialog the strength tile shows *inside* the QS panel via
+  TileService.showDialog() (available since API 24), which is why this component
+  can stay a pure system service.
+
+  No root, no su/Magisk/KernelSU, no SELinux permissive. The privileges that
+  make the direct node write legal come from the TWRP package (node ownership +
+  one-node SELinux rule + init.rc), never from a runtime escalation.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Torch control rung 1: the platform camera service owns the torch. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Re-add the tiles after a reboot or an update, with no user action. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Privileged system permission, allowlisted in /system/etc/permissions by
+         the TWRP package. It lets the component insert its own tiles into the QS
+         panel on first boot, so the user never has to drag anything. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_tile_torch"
+        android:label="@string/component_label"
+        android:supportsRtl="true">
+
+        <!-- QS tile #1: tap toggles off <-> the last used strength. -->
+        <service
+            android:name=".TorchTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_torch"
+            android:label="@string/tile_torch_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
+        <!-- QS tile #2: the strength widget. Tapping it opens the strength picker
+             as a dialog inside the QS panel. -->
+        <service
+            android:name=".TorchStrengthTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_strength"
+            android:label="@string/tile_strength_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+
+        <!-- Inserts the tiles into the QS panel on first boot and after an
+             update. No user interaction, no app to open. -->
+        <receiver
+            android:name=".TileInstallerReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

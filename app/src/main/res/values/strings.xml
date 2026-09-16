@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Component / tile labels (shown in the QS editor and under the tiles). -->
+    <string name="component_label">Torch strength</string>
+    <string name="tile_torch_label">Torch</string>
+    <string name="tile_strength_label">Torch strength</string>
+
+    <!-- Tile subtitles. The mode is included on purpose: it is the single most
+         useful diagnostic when torch strength "does not work" on a ROM. -->
+    <string name="tile_state_level">Strength %1$d of %2$d</string>
+    <string name="tile_state_off">Off · %1$s</string>
+
+    <!-- Strength picker dialog. -->
+    <string name="picker_title">Torch strength</string>
+    <string name="picker_value">%1$d / %2$d</string>
+    <string name="picker_off">Off</string>
+    <string name="picker_stop_off">0</string>
+
+    <!-- Shown when no torch path is usable at all, so the failure is explicit
+         rather than a silently dead tile. -->
+    <string name="tile_state_unavailable">Unavailable · %1$s</string>
+</resources>

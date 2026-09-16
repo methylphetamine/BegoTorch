@@ -1,0 +1,185 @@
+#!/sbin/sh
+#
+# TorchBridge — TWRP flashable installer (update-binary).
+#
+# This file is a shell script rather than an edify binary, which is the standard
+# arrangement for installers that have real work to do: TWRP executes
+# update-binary directly, and a `#!/sbin/sh` script can mount partitions, detect
+# the system layout and patch a policy file in ways edify cannot express.
+# updater-script exists alongside it only because the flashable-zip format
+# expects the file to be present.
+#
+# TWRP invokes it as:  update-binary <api> <outfd> <zipfile>
+#
+# Everything after this banner is a thin, recovery-aware wrapper around
+# scripts/flash.sh, so the logic that a terminal install would run and the logic a
+# swipe-to-flash install runs are literally the same code.
+#
+# There is no interactive input anywhere in here, by design: the zip either
+# installs completely or reports why it could not, and the recovery UI is the only
+# place progress is reported.
+
+OUTFD="$2"
+ZIPFILE="$3"
+PKG="torchbridge"
+
+ui_print() {
+    # Falls back to stdout when the fd is not writable. TWRP always passes a good
+    # descriptor, but a recovery that passes something else would otherwise turn
+    # every progress line into a stderr storm and hide the real error.
+    if [ -w "/proc/self/fd/$OUTFD" ]; then
+        echo "ui_print $1" >> "/proc/self/fd/$OUTFD"
+        echo "ui_print" >> "/proc/self/fd/$OUTFD"
+    else
+        echo "$1"
+    fi
+}
+
+set_progress() {
+    if [ -w "/proc/self/fd/$OUTFD" ]; then
+        echo "set_progress $1" >> "/proc/self/fd/$OUTFD"
+    fi
+}
+
+abort() {
+    ui_print " "
+    ui_print "! $1"
+    ui_print "! Installation aborted. Nothing was left half-applied."
+    exit 1
+}
+
+# Echoes a log file line by line into the recovery UI.
+print_log() {
+    while IFS= read -r line; do
+        [ -n "$line" ] && ui_print "  $line"
+    done < "$1"
+}
+
+ui_print " "
+ui_print "====================================="
+ui_print " TorchBridge"
+ui_print " Torch strength control in the QS panel"
+ui_print " No root, no SELinux permissive"
+ui_print "====================================="
+ui_print " "
+set_progress 0.05
+
+# --- sanity ------------------------------------------------------------------
+
+[ -n "$OUTFD" ] || {
+    echo "error: no recovery UI file descriptor; flash this zip from TWRP." >&2
+    exit 1
+}
+[ -f "$ZIPFILE" ] || abort "cannot find the zip file to extract ($ZIPFILE)"
+
+if ! command -v unzip > /dev/null 2>&1; then
+    abort "unzip is not available in this recovery"
+fi
+
+WORK="/tmp/$PKG-install"
+rm -rf "$WORK"
+mkdir -p "$WORK" || abort "cannot create $WORK"
+
+# --- extract -----------------------------------------------------------------
+
+ui_print "- Extracting package"
+unzip -o "$ZIPFILE" -d "$WORK" > /dev/null 2>&1 ||
+    abort "could not extract the package (out of space in /tmp?)"
+
+if [ ! -f "$WORK/scripts/flash.sh" ]; then
+    abort "the package is incomplete: scripts/flash.sh is missing"
+fi
+set_progress 0.15
+
+# --- mount system ------------------------------------------------------------
+
+ui_print "- Mounting the system partition read-write"
+# /system_root first and always where it exists: that is the System-as-Root mount
+# point, and it is the only path that reliably accepts writes. /system is a bind
+# mount of the same image and is where EROFS failures show up.
+for target in /system_root /system; do
+    [ -d "$target" ] || continue
+    mount "$target" > /dev/null 2>&1 || true
+    mount -o rw,remount "$target" > /dev/null 2>&1 || true
+done
+
+if [ -d /system_root/system/priv-app ]; then
+    ui_print "  using /system_root/system (System-as-Root)"
+elif [ -d /system_root/priv-app ]; then
+    ui_print "  using /system_root"
+elif [ -d /system/priv-app ] || [ -d /system/system/priv-app ]; then
+    ui_print "  using /system (this device has no /system_root)"
+else
+    abort "no system partition with a priv-app directory is mounted. Mount System in TWRP and flash again."
+fi
+set_progress 0.3
+
+# --- install -----------------------------------------------------------------
+
+ui_print "- Installing"
+sh "$WORK/scripts/flash.sh" > "$WORK/install.log" 2>&1
+status=$?
+
+# Always surface what happened: on failure the log is the whole diagnosis, and on
+# success it is the record of what was written where.
+print_log "$WORK/install.log"
+
+# Keep the log readable after the flash, from the recovery terminal or a booted
+# system, since the UI scrollback is lost the moment the screen clears.
+cp "$WORK/install.log" /tmp/torchbridge-install.log 2>/dev/null || true
+
+if [ "$status" != "0" ]; then
+    ui_print " "
+    ui_print "! The installer failed (exit $status)."
+    ui_print "! The log above names the failing step; the most common cause is a"
+    ui_print "! read-only (EROFS) system image, which cannot be modified from"
+    ui_print "! recovery at all."
+    ui_print "! Full log: /tmp/torchbridge-install.log"
+    exit 1
+fi
+set_progress 0.95
+
+# --- verify ------------------------------------------------------------------
+
+ui_print " "
+ui_print "- Verifying"
+sh "$WORK/scripts/install.sh" > "$WORK/verify.log" 2>&1
+verify=$?
+print_log "$WORK/verify.log"
+
+if [ "$verify" != "0" ]; then
+    # Deliberately not fatal. The files are in place and the tiles will work; the
+    # only piece that can plausibly be missing here is the policy rule, and in
+    # that case the component still controls the torch through the camera
+    # framework, just with fewer strength steps. Failing the whole flash would
+    # hide that distinction behind an "aborted" message.
+    ui_print " "
+    ui_print "* One piece is missing (see above). The tiles will still control the"
+    ui_print "* torch, but strength steps may be limited to what the ROM's camera"
+    ui_print "* service supports. Re-flashing once the system partition is mounted"
+    ui_print "* read-write usually resolves it."
+fi
+set_progress 1.0
+
+# --- finish ------------------------------------------------------------------
+
+ui_print " "
+ui_print "====================================="
+ui_print " Done. Reboot to system."
+ui_print " "
+ui_print " The two tiles are added to the Quick"
+ui_print " Settings panel by the component itself"
+ui_print " on the first boot:"
+ui_print "   Torch           toggle on/off"
+ui_print "   Torch strength  0-7 picker"
+ui_print " "
+ui_print " No launcher icon, nothing to open."
+ui_print " No root; SELinux stays enforcing."
+ui_print " "
+ui_print " To remove everything later, flash"
+ui_print " torchbridge-uninstall.zip."
+ui_print "====================================="
+ui_print " "
+
+rm -rf "$WORK"
+exit 0

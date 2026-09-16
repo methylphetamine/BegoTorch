@@ -1,0 +1,74 @@
+;; ---------------------------------------------------------------------------
+;; TorchBridge — SELinux injection block (enforcing-safe, one node wide)
+;; ---------------------------------------------------------------------------
+;;
+;; Why this file exists
+;; --------------------
+;; powa_karnal already exposes the torch knob to unprivileged writers:
+;; `drivers/misc/mediatek/flashlight/flashlights-mt6360-mt6785.c` declares
+;; dev_attr_torchbrightness with mode 0666, so the DAC layer is solved. What is
+;; *not* solved by the kernel is SELinux: the attribute inherits the `sysfs`
+;; type from the platform device, and no ROM lets an app domain write `sysfs`.
+;; That single label is the entire reason torch apps on this device have to ask
+;; for root. This block fixes the label, and nothing else.
+;;
+;; Properties this block deliberately has
+;; --------------------------------------
+;;   * Enforcement stays ON. There is no permissive domain, no `permissive`
+;;     statement, and no `setenforce 0` anywhere in this project.
+;;   * It is a *type transition for specific paths*, not a policy relaxation:
+;;     those files are relabelled `torchnode` and only that type is opened up.
+;;   * Only system application domains are granted access (never
+;;     untrusted_app), so the grant is reachable only from /system/priv-app or
+;;     /system apps — code that already runs with system privileges.
+;;   * It is reversible: `twrp/selinux_inject.sh revert <mount>` restores the
+;;     original policy file byte-for-byte from its backup.
+;;
+;; How it is applied
+;; -----------------
+;; `twrp/selinux_inject.sh` appends this block to the platform policy
+;; (`/system/etc/selinux/plat_sepolicy.cil`) and substitutes the
+;; `;;@DOMAIN_RULES@` marker with allow rules for exactly the app domains that
+;; the target ROM's policy actually declares. Referencing a type the policy does
+;; not define would make the policy fail to compile and the device would not
+;; boot, so that filtering is mandatory, not cosmetic.
+;;
+;; The paths below cover both spellings the driver's platform device can end up
+;; with. `MT6360_NAME` in the vendored driver is "flashlights-mt6360" (hyphen,
+;; which gives /sys/devices/platform/flashlights-mt6360/), while MTK's
+;; mtk_platform_device path and the upstream device tree's init.project.rc both
+;; use "flashlights_mt6360" (underscore). genfscon entries for paths that do not
+;; exist are harmless, so both are declared and both are tried at runtime.
+;; ---------------------------------------------------------------------------
+
+;; The dedicated type for the torch knobs.
+(type torchnode)
+(typeattributeset file_type (torchnode))
+(typeattributeset sysfs_type (torchnode))
+
+;; Label the exact files. The whole flashlights* tree is NOT relabelled on
+;; purpose: the driver also publishes flash/strobe attributes there that the
+;; vendor flashlight HAL reaches through its own (unchanged) labels.
+(genfscon sysfs /devices/platform/flashlights-mt6360/torchbrightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/platform/flashlights_mt6360/torchbrightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/platform/flashlights-mt6360/leds/torch-light0/brightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/platform/flashlights-mt6360/leds/torch-light1/brightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/platform/flashlights-mt6360/leds/torch-light2/brightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/platform/flashlights_mt6360/leds/torch-light0/brightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/platform/flashlights_mt6360/leds/torch-light1/brightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/platform/flashlights_mt6360/leds/torch-light2/brightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/virtual/leds/torch-light0/brightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/virtual/leds/torch-light1/brightness u:object_r:torchnode:s0)
+(genfscon sysfs /devices/virtual/leds/torch-light2/brightness u:object_r:torchnode:s0)
+
+;; init applies the remaining DAC bits at boot (chown/chmod) from the rc snippet
+;; the flash script installs, and it needs setattr on the new type to do that.
+(allow init torchnode (file (getattr setattr open read write)))
+(allow init torchnode (dir (getattr search)))
+(allow init sysfs (dir (getattr search)))
+
+;; `sysfs_type` lets the kernel's own sysfs plumbing keep working; the rules
+;; that matter are the per-domain ones substituted below:
+;;   (allow <domain> torchnode (file (append getattr ioctl lock map open read write)))
+;;   (allow <domain> sysfs (dir (search)))
+;;@DOMAIN_RULES@

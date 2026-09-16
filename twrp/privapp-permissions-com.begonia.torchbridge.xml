@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Privileged-permission allowlist for TorchBridge.
+  Installed by twrp/flash.sh to <system>/etc/permissions/.
+
+  WRITE_SECURE_SETTINGS is what lets the component append its own tiles to the
+  `sysui_qs_tiles` setting on first boot, which is how the tiles appear in the
+  Quick Settings panel with no user interaction at all.
+
+  This file is required, not optional: from Android 9 onwards a privileged app
+  requesting a privileged permission that is absent from the allowlist is denied
+  it, and a priv-app declaring such a permission without an allowlist entry can
+  put the device into a boot failure. Installing it together with the APK is what
+  keeps the device bootable and the tiles automatic.
+-->
+<permissions>
+    <privapp-permissions package="com.begonia.torchbridge">
+        <permission name="android.permission.WRITE_SECURE_SETTINGS" />
+    </privapp-permissions>
+</permissions>

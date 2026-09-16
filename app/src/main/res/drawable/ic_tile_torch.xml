@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Torch tile glyph: a flashlight seen from the side (head, barrel, tail cap).
+  Drawn as plain rectangles on a 24x24 viewport and filled white, because SystemUI
+  tints QS tile icons itself: hard-coding a colour here would fight the theme.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Head -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6.5,2 L17.5,2 L17.5,6.5 L6.5,6.5 Z" />
+    <!-- Barrel -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M9,6.5 L15,6.5 L15,15.5 L9,15.5 Z" />
+    <!-- Tail cap -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8.5,16.5 L15.5,16.5 L15.5,22 L8.5,22 Z" />
+    <!-- Beam sliver, so an inactive tile still reads as "torch" -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4.5,3.5 L3,4.5 L3,4 L3,6.5 L3,6 L4.5,5.5 Z" />
+</vector>

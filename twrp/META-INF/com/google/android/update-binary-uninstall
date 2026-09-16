@@ -1,0 +1,85 @@
+#!/sbin/sh
+#
+# TorchBridge — TWRP flashable uninstaller (update-binary).
+#
+# The counterpart of the installer: swipe this zip in TWRP and everything the
+# installer did is undone, including the SELinux policy change, which is restored
+# from the byte-for-byte backup the injector took.
+#
+# TWRP invokes it as:  update-binary <api> <outfd> <zipfile>
+
+OUTFD="$2"
+ZIPFILE="$3"
+PKG="torchbridge"
+
+ui_print() {
+    # Same fallback as the installer: never turn a bad descriptor into a flood of
+    # stderr that hides the real error.
+    if [ -w "/proc/self/fd/$OUTFD" ]; then
+        echo "ui_print $1" >> "/proc/self/fd/$OUTFD"
+        echo "ui_print" >> "/proc/self/fd/$OUTFD"
+    else
+        echo "$1"
+    fi
+}
+
+print_log() {
+    while IFS= read -r line; do
+        [ -n "$line" ] && ui_print "  $line"
+    done < "$1"
+}
+
+ui_print " "
+ui_print "====================================="
+ui_print " TorchBridge uninstall"
+ui_print "====================================="
+ui_print " "
+
+[ -n "$OUTFD" ] || {
+    echo "error: flash this zip from TWRP." >&2
+    exit 1
+}
+
+WORK="/tmp/$PKG-uninstall"
+rm -rf "$WORK"
+mkdir -p "$WORK" || exit 1
+
+ui_print "- Extracting package"
+unzip -o "$ZIPFILE" -d "$WORK" > /dev/null 2>&1 ||
+    abort_placeholder=1
+
+if [ ! -f "$WORK/scripts/uninstall.sh" ]; then
+    ui_print "! the package is incomplete: scripts/uninstall.sh is missing"
+    exit 1
+fi
+
+ui_print "- Mounting the system partition read-write"
+for target in /system_root /system; do
+    [ -d "$target" ] || continue
+    mount "$target" > /dev/null 2>&1 || true
+    mount -o rw,remount "$target" > /dev/null 2>&1 || true
+done
+
+ui_print "- Removing TorchBridge"
+sh "$WORK/scripts/uninstall.sh" > "$WORK/uninstall.log" 2>&1
+status=$?
+print_log "$WORK/uninstall.log"
+cp "$WORK/uninstall.log" /tmp/torchbridge-uninstall.log 2>/dev/null || true
+
+if [ "$status" != "0" ]; then
+    ui_print " "
+    ui_print "! Uninstall did not complete (exit $status)."
+    ui_print "! Full log: /tmp/torchbridge-uninstall.log"
+    exit 1
+fi
+
+ui_print " "
+ui_print "====================================="
+ui_print " Removed. Reboot to system."
+ui_print " The tiles disappear and the ROM's own"
+ui_print " SELinux policy is back in force."
+ui_print "====================================="
+ui_print " "
+
+rm -rf "$WORK"
+exit 0

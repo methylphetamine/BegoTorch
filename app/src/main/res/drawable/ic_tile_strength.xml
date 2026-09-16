@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Torch strength tile glyph: a five-step level meter.
+  A meter rather than a sun because the tile reports *how strong* the torch is;
+  SystemUI tints the glyph, so it is filled white and carries no colour of its own.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2.5,22 L5.5,22 L5.5,16 L2.5,16 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.25,22 L10.25,22 L10.25,13 L7.25,13 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,22 L15,22 L15,10 L12,10 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M16.75,22 L19.75,22 L19.75,7 L16.75,7 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M21.5,22 L24,22 L24,4 L21.5,4 Z" />
+</vector>

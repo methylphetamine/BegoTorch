@@ -1,0 +1,34 @@
+# TorchBridge init snippet — installed to <system>/etc/init/torchbridge.rc.
+#
+# This is the DAC half of what the torch node needs, and it is why the component
+# works on ROMs whose kernel is stock as well as on powa_karnal:
+#
+#   * powa_karnal publishes dev_attr_torchbrightness with mode 0666, so the node
+#     is already world-writable and these lines are no-ops that merely normalise
+#     ownership.
+#   * a stock kernel leaves the attribute at 0644 root-owned, where no app can
+#     write regardless of policy. chmod 0666 here fixes that at every boot.
+#
+# Two triggers on purpose: post-fs-data normally runs after the MT6360 i2c driver
+# has probed, and sys.boot_completed is the belt-and-braces pass for kernels whose
+# probe is deferred. chmod on a path that does not exist yet only logs; it never
+# blocks the boot.
+#
+# Both platform-device spellings are covered: MT6360_NAME yields the hyphenated
+# path, while the device tree and MTK's platform-device path use the underscored
+# one. Whichever this kernel created is the one that takes effect.
+
+on post-fs-data
+    chmod 0666 /sys/devices/platform/flashlights-mt6360/torchbrightness
+    chmod 0666 /sys/devices/platform/flashlights_mt6360/torchbrightness
+    chown system system /sys/devices/platform/flashlights-mt6360/torchbrightness
+    chown system system /sys/devices/platform/flashlights_mt6360/torchbrightness
+    chmod 0666 /sys/class/leds/torch-light0/brightness
+    chmod 0666 /sys/class/leds/torch-light1/brightness
+    chmod 0666 /sys/class/leds/torch-light2/brightness
+
+on property:sys.boot_completed=1
+    chmod 0666 /sys/devices/platform/flashlights-mt6360/torchbrightness
+    chmod 0666 /sys/devices/platform/flashlights_mt6360/torchbrightness
+    chown system system /sys/devices/platform/flashlights-mt6360/torchbrightness
+    chown system system /sys/devices/platform/flashlights_mt6360/torchbrightness
