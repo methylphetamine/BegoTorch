@@ -61,13 +61,18 @@ object Torch {
      * Candidate nodes, most preferred first.
      *
      * The `torchbrightness` attribute speaks the native 0..7 level so it is
-     * tried before the LED-class devices that need scaling. The LED paths are
-     * listed in both their class view and their canonical `/devices/virtual`
-     * view, since which one a given kernel exposes depends on how the driver
-     * registered the LED (`led_classdev_register(NULL, ...)` puts it under
-     * virtual, a real parent device puts it under that device).
+     * tried before the LED-class devices that need scaling. Both platform-device
+     * spellings are listed — the upstream device tree uses the hyphen form
+     * `flashlights-mt6360` while MTK's platform device / init.project.rc use
+     * the underscore form `flashlights_mt6360`; the SELinux block labels
+     * whichever one the kernel actually exposes. The LED paths are listed in
+     * both their class view and their canonical `/devices/virtual` view, since
+     * which one a given kernel exposes depends on how the driver registered the
+     * LED (`led_classdev_register(NULL, ...)` puts it under virtual, a real
+     * parent device puts it under that device).
      */
     private val NODES = listOf(
+        Node("/sys/devices/platform/flashlights-mt6360/torchbrightness", ledScale = false),
         Node("/sys/devices/platform/flashlights_mt6360/torchbrightness", ledScale = false),
         Node("/sys/devices/platform/flashlights_mt6360/leds/torch-light0/brightness", ledScale = true),
         Node("/sys/class/leds/torch-light0/brightness", ledScale = true),
@@ -130,7 +135,12 @@ object Torch {
             val chars = cameraManager(context)?.getCameraCharacteristics(id) ?: return false
             val max = chars.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL)
                 ?: return false
-            if (max < 1) return false
+            // A reported maximum of 1 is on/off only, not real strength control.
+            // Accepting it would shadow the sysfs torchbrightness rung (rung 2)
+            // that the flash-time policy enables for the full 0..7 range,
+            // collapsing the picker to just 0/1. Only honour the camera rung when
+            // it actually offers multi-level control.
+            if (max < 2) return false
             cachedCameraMaxLevel = max.coerceIn(1, MAX_LEVEL)
             Log.i(TAG, "camera $id supports torch strength, ROM max=$max")
             true
