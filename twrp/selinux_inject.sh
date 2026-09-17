@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/sbin/sh
 #
 # selinux_inject.sh — apply or revert the TorchBridge SELinux rule.
 #

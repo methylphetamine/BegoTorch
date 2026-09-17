@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/sbin/sh
 #
 # uninstall.sh — remove TorchBridge completely, including the policy change.
 #

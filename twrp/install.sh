@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/sbin/sh
 #
 # install.sh — post-flash verification hook.
 #

@@ -92,6 +92,7 @@ stage_scripts() {
     done
 
     install -m 0755 "$ROOT/twrp/$META_DIR/update-binary" "$stage/$META_DIR/update-binary"
+# NOTE: the same update-binary is used for both install and uninstall zips now.
 }
 
 zip_dir() {
@@ -156,8 +157,11 @@ zip_dir "$INSTALL_STAGE" "$DIST/torchbridge-flashable.zip"
 
 UNINSTALL_STAGE="$TMP/uninstall"
 stage_scripts "$UNINSTALL_STAGE"
-# Same layout, different entry point: the remover instead of the installer.
-install -m 0755 "$ROOT/twrp/$META_DIR/update-binary-uninstall" \
+# Same layout and the same entry point as the install zip. The uninstall job is
+# selected at flash time purely by filename (basename contains 'uninstall'),
+# so the single update-binary handles both jobs and one rename is all that is
+# needed to turn the install zip into an uninstaller.
+install -m 0755 "$ROOT/twrp/$META_DIR/update-binary" \
     "$UNINSTALL_STAGE/$META_DIR/update-binary"
 
 zip_dir "$UNINSTALL_STAGE" "$DIST/torchbridge-uninstall.zip"

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/sbin/sh
 #
 # flash.sh — install TorchBridge from a TWRP "Open Terminal" shell.
 #

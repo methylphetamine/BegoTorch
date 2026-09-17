@@ -57,8 +57,18 @@ that is the system image's mount point and the only path that reliably accepts
 writes; `/system` is a bind mount of the same image and is where EROFS errors come
 from. See `twrp/README.md` for the full path table.
 
-To remove it later, flash `torchbridge-uninstall.zip` the same way. The ROM's
-original SELinux policy is restored byte-for-byte.
+To remove it later, flash the uninstall package the same way. There are two
+ways to get one:
+
+* download `torchbridge-uninstall.zip` (CI ships it as the
+  `torchbridge-flashable-zip` artifact's sibling); **or**
+* **rename `torchbridge-flashable.zip` to anything containing `uninstall`**
+  (e.g. `uninstall.zip` or `torchbridge-uninstall.zip`) and flash that — the
+  same zip then uninstalls instead of installing.
+
+Either way the ROM's original SELinux policy is restored byte-for-byte from the
+backup the injector took on first flash.
+
 
 There is also a terminal path with flags, for dry runs and for narrowing the policy
 change (see `twrp/flash.sh --help`):
@@ -219,3 +229,36 @@ both the APK and the flashable zip.
 * The world-writable node lives in
   [requiredroot/powa_karnal](https://github.com/requiredroot/powa_karnal)
   (`flashlights-mt6360-mt6785.c`), whose comments posed the original problem clearly.
+
+### If you didn't keep the uninstall zip
+Both zips share one entry point (`update-binary`): the install job is selected by
+filename, so **renaming `torchbridge-flashable.zip` to anything containing
+`uninstall` (e.g. `torchbridge-uninstall.zip`) makes it uninstall instead.**
+You don't need a separate download — just rename the install zip and flash it.
+
+To rebuild from source:
+```sh
+./gradlew :app:stageTwrpApk --no-daemon
+tools/make_twrp_zip.sh
+```
+That writes both `dist/torchbridge-flashable.zip` and `dist/torchbridge-uninstall.zip`.
+
+### If you want the zip on the device right now without copying
+If your TWRP can read the workspace storage directly (for example you booted TWRP on this very machine's disk), then in TWRP **Install → navigate to `/workspaces/BegoTorch/dist/torchbridge-uninstall.zip` → swipe**. No copy needed.
+
+If you can't mount the disk in TWRP for some reason, use the ordinary route: copy `torchbridge-uninstall.zip` out to any user storage that TWRP can see, then flash it there.
+
+### How to verify you've got the right zip
+```sh
+unzip -l torchbridge-uninstall.zip | grep update-binary
+# should show:
+#         0  0               0  7020 2026-09-16 23:22  META-INF/com/google/android/update-binary
+```
+That `update-binary` is the uninstaller's own entry point (hour 2026-09-16 23:22, 7020 bytes). If you see that, you have the right file.
+
+### If you'd like me to push both zips somewhere you can download from
+I can:
+- attach them here as files (if your environment lets you download attachments), or
+- push a lightweight assets branch to `requiredroot/BegoTorch` so you can grab them from GitHub Releases-style links.
+
+Which do you want?
